@@ -1,4 +1,4 @@
-name: Guest Wrappers ISO
+name: QEMU 3dfx Builds
 
 on:
   push:
@@ -52,4 +52,61 @@ jobs:
             artifacts/qemu-3dfx-guest-wrappers.iso
             artifacts/qemu-3dfx-guest-wrappers.iso.sha256
             artifacts/guest-wrappers/iso-root/**
+          if-no-files-found: error
+
+  build-qemu-binaries:
+    name: Build QEMU binaries
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cache QEMU source tarball
+        uses: actions/cache@v4
+        with:
+          path: .cache/qemu
+          key: qemu-source-9.2.2
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            ca-certificates \
+            build-essential \
+            curl \
+            git \
+            libepoxy-dev \
+            libglib2.0-dev \
+            libgl1-mesa-dev \
+            libpixman-1-dev \
+            libsdl2-dev \
+            libslirp-dev \
+            libx11-dev \
+            libxxf86vm-dev \
+            ninja-build \
+            patch \
+            pkg-config \
+            python3 \
+            python3-venv \
+            xz-utils \
+            zlib1g-dev
+
+      - name: Build QEMU binaries
+        run: scripts/build_qemu_binaries.sh
+
+      - name: Verify QEMU package
+        run: |
+          sha256sum -c artifacts/qemu-binaries/*.sha256
+          tar -tzf artifacts/qemu-binaries/qemu-3dfx-qemu-9.2.2-linux-x86_64.tar.gz | grep 'opt/qemu-3dfx/bin/qemu-system-i386'
+          tar -tzf artifacts/qemu-binaries/qemu-3dfx-qemu-9.2.2-linux-x86_64.tar.gz | grep 'opt/qemu-3dfx/bin/qemu-system-x86_64'
+
+      - name: Upload QEMU binaries artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-3dfx-linux-x86_64
+          path: |
+            artifacts/qemu-binaries/qemu-3dfx-qemu-9.2.2-linux-x86_64.tar.gz
+            artifacts/qemu-binaries/qemu-3dfx-qemu-9.2.2-linux-x86_64.tar.gz.sha256
+            artifacts/qemu-binaries/*.version.txt
           if-no-files-found: error
