@@ -34,6 +34,19 @@ copy_optional() {
   fi
 }
 
+verify_xp_runtime_imports() {
+  local file="$1"
+  if [[ ! -f "$file" ]]; then
+    echo "Missing expected Windows PE file: $file" >&2
+    exit 1
+  fi
+  if objdump -p "$file" | grep -Eiq 'DLL Name: (api-ms-win-crt|ucrtbase\.dll)'; then
+    echo "Modern UCRT import found in $file; this is not compatible with Windows 9x/2000/XP." >&2
+    objdump -p "$file" | grep -Ei 'DLL Name: (api-ms-win-crt|ucrtbase\.dll)' >&2 || true
+    exit 1
+  fi
+}
+
 write_crlf() {
   local dst="$1"
   mkdir -p "$(dirname "$dst")"
@@ -44,6 +57,7 @@ require_cmd bash
 require_cmd gendef
 require_cmd git
 require_cmd make
+require_cmd objdump
 require_cmd shasum
 require_cmd xorriso
 require_cmd xxd
@@ -69,6 +83,16 @@ echo "Building Mesa/OpenGL guest wrapper..."
   make
   make clean
 )
+
+echo "Verifying Windows XP compatible runtime imports..."
+for pe_file in \
+  "$BUILD_3DFX/glide.dll" \
+  "$BUILD_3DFX/glide2x.dll" \
+  "$BUILD_3DFX/glide3x.dll" \
+  "$BUILD_3DFX/instdrv.exe" \
+  "$BUILD_MESA/opengl32.dll"; do
+  verify_xp_runtime_imports "$pe_file"
+done
 
 WIN9X="$STAGE_DIR/Win9x-ME"
 WINXP="$STAGE_DIR/Win2K-XP"

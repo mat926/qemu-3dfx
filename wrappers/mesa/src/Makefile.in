@@ -5,10 +5,11 @@ CC=$(CROSS)gcc
 RC=windres
 DLLTOOL=dlltool
 STRIP=strip
+CRT_CFLAGS:=$(shell printf 'int main(void){return 0;}\n' | $(CC) -x c -mcrtdll=msvcrt-os -c - -o /dev/null >/dev/null 2>&1 && printf '%s' '-mcrtdll=msvcrt-os')
 CFLAGS=-march=x86-64-v2 -mtune=generic -mfpmath=sse -O3
 CFLAGS+=-pipe -I$(QEMU_SRC_DIR)/hw/mesa -I$(FXLIB) -Wall -Werror -fomit-frame-pointer
 CFLAGS+=-fuse-linker-plugin -flto=auto
-CFLAGS+=-mcrtdll=msvcrt-os
+CFLAGS+=$(CRT_CFLAGS)
 LDFLAGS=-static-libgcc
 LDFLAGS+=-Wl,--disable-auto-image-base,--no-seh,--dynamicbase,--nxcompat
 SRCDIR=../src
