@@ -8,6 +8,7 @@ STRIP=strip
 CFLAGS=-march=x86-64-v2 -mtune=generic -mfpmath=sse -O3
 CFLAGS+=-pipe -I$(QEMU_SRC_DIR)/hw/mesa -I$(FXLIB) -Wall -Werror -fomit-frame-pointer
 CFLAGS+=-fuse-linker-plugin -flto=auto
+CFLAGS+=-mcrtdll=msvcrt-os
 LDFLAGS=-static-libgcc
 LDFLAGS+=-Wl,--disable-auto-image-base,--no-seh,--dynamicbase,--nxcompat
 SRCDIR=../src
@@ -70,4 +71,3 @@ clean:
 
 distclean: clean
 	@rm -f $(TARGET) $(TOOLS)
-

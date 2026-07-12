@@ -3,6 +3,7 @@ CROSS?=
 CC=$(CROSS)gcc
 CFLAGS=-march=x86-64-v2 -mtune=generic -mfpmath=sse
 CFLAGS+=-pipe -I$(FXLIB) -Wall -Wextra -Werror
+CFLAGS+=-mcrtdll=msvcrt-os
 OUTDIR?=build
 
 all: instdrv.exe fxmemmap.vxd fxptl.sys shasum

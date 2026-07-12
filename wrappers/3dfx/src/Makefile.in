@@ -9,6 +9,7 @@ STRIP=strip
 CFLAGS=-march=x86-64-v2 -mtune=generic -mfpmath=sse -O3
 CFLAGS+=-pipe -I$(QEMU_SRC_DIR)/hw/3dfx -I$(FXLIB) -D__REV__=\"$(GIT)\" -Wall -Werror -fomit-frame-pointer
 CFLAGS+=-fuse-linker-plugin -flto=auto
+CFLAGS+=-mcrtdll=msvcrt-os
 LDFLAGS=-static-libgcc
 LDFLAGS+=-Wl,--disable-auto-image-base,--no-seh,--dynamicbase,--nxcompat
 SRCDIR=../src
@@ -140,4 +141,3 @@ distclean: clean
 	@make -C ../dxe $@ OUTDIR=$(OUTDIR)
 	@make -C ../ovl $@ OUTDIR=$(OUTDIR)
 	@rm -f $(TARGET1) $(TARGET2) $(TARGET3) *.a *.vxd *.sys *.exe *.zip
-
