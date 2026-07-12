@@ -1,0 +1,55 @@
+name: Guest Wrappers ISO
+
+on:
+  push:
+    branches:
+      - master
+      - winxp-archlinux-sdl-wrapper-fixes
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-guest-wrappers-iso:
+    name: Build guest wrappers ISO
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            binutils \
+            binutils-mingw-w64-i686 \
+            build-essential \
+            gcc-mingw-w64-i686 \
+            git \
+            libdigest-sha-perl \
+            make \
+            mingw-w64-tools \
+            perl \
+            xorriso \
+            xxd
+
+      - name: Build guest wrappers and ISO
+        run: scripts/build_guest_wrapper_iso.sh
+
+      - name: Verify ISO contents
+        run: |
+          xorriso -indev artifacts/qemu-3dfx-guest-wrappers.iso -find / -type f
+          sha256sum -c artifacts/qemu-3dfx-guest-wrappers.iso.sha256
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-3dfx-guest-wrappers
+          path: |
+            artifacts/qemu-3dfx-guest-wrappers.iso
+            artifacts/qemu-3dfx-guest-wrappers.iso.sha256
+            artifacts/guest-wrappers/iso-root/**
+          if-no-files-found: error
