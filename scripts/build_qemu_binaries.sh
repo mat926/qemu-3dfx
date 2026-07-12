@@ -66,6 +66,7 @@ echo "Configuring QEMU targets: $TARGET_LIST"
     --target-list="$TARGET_LIST" \
     --enable-sdl \
     --enable-opengl \
+    --enable-pipewire \
     --enable-slirp \
     --enable-tools \
     --disable-docs \
@@ -82,6 +83,12 @@ echo "Verifying qemu-3dfx version banner"
 grep -q 'featuring qemu-3dfx@' "$DIST_DIR/qemu-system-i386.version.txt"
 grep -q 'featuring qemu-3dfx@' "$DIST_DIR/qemu-system-x86_64.version.txt"
 
+echo "Verifying PipeWire audio backend"
+"$BUILD_DIR/qemu-system-i386" -audiodev help | tee "$DIST_DIR/qemu-system-i386.audiodev.txt"
+"$BUILD_DIR/qemu-system-x86_64" -audiodev help | tee "$DIST_DIR/qemu-system-x86_64.audiodev.txt"
+grep -q '^pipewire$' "$DIST_DIR/qemu-system-i386.audiodev.txt"
+grep -q '^pipewire$' "$DIST_DIR/qemu-system-x86_64.audiodev.txt"
+
 echo "Installing QEMU into package root"
 make -C "$BUILD_DIR" install DESTDIR="$PACKAGE_ROOT"
 
@@ -96,7 +103,8 @@ Primary binaries:
   opt/qemu-3dfx/bin/qemu-system-x86_64
 
 The binaries are dynamically linked and are intended for Linux x86_64 systems
-with compatible runtime libraries installed.
+with compatible runtime libraries installed. The build explicitly enables the
+PipeWire audio backend for libvirt domains that use audio type='pipewire'.
 EOF
 
 tar -C "$PACKAGE_ROOT" -czf "$DIST_DIR/$PACKAGE_NAME.tar.gz" opt

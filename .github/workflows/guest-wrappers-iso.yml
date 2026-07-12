@@ -79,6 +79,7 @@ jobs:
             libepoxy-dev \
             libglib2.0-dev \
             libgl1-mesa-dev \
+            libpipewire-0.3-dev \
             libpixman-1-dev \
             libsdl2-dev \
             libslirp-dev \
@@ -108,5 +109,6 @@ jobs:
           path: |
             artifacts/qemu-binaries/qemu-3dfx-qemu-9.2.2-linux-x86_64.tar.gz
             artifacts/qemu-binaries/qemu-3dfx-qemu-9.2.2-linux-x86_64.tar.gz.sha256
+            artifacts/qemu-binaries/*.audiodev.txt
             artifacts/qemu-binaries/*.version.txt
           if-no-files-found: error
