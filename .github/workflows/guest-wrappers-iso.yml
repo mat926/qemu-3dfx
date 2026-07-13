@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build-guest-wrappers-iso:
-    name: Build guest wrappers ISO
+    name: Build VMADDONS ISO
     runs-on: ubuntu-24.04
 
     steps:
@@ -27,40 +27,44 @@ jobs:
             binutils \
             binutils-mingw-w64-i686 \
             build-essential \
-            curl \
             gcc-mingw-w64-i686 \
             git \
             libdigest-sha-perl \
-            libarchive-tools \
             make \
             mingw-w64-tools \
             perl \
             xorriso \
             xxd
 
-      - name: Build guest wrappers and ISO
+      - name: Build guest wrappers and VMADDONS ISO
         run: scripts/build_guest_wrapper_iso.sh
 
       - name: Verify ISO contents
         run: |
-          xorriso -indev artifacts/qemu-3dfx-guest-wrappers.iso -find / -type f | tee /tmp/qemu-3dfx-guest-wrappers-files.txt
-          grep -q '/Win2K-XP/Direct3D/VERSIONS.TXT' /tmp/qemu-3dfx-guest-wrappers-files.txt
-          grep -q '/Win2K-XP/Direct3D/WineD3D-1.7.52/d3d9.dll' /tmp/qemu-3dfx-guest-wrappers-files.txt
-          grep -q '/Win2K-XP/Direct3D/WineD3D-1.7.52/wined3d.dll' /tmp/qemu-3dfx-guest-wrappers-files.txt
-          grep -q '/Win2K-XP/Direct3D/WineD3D-1.7.52/libwine.dll' /tmp/qemu-3dfx-guest-wrappers-files.txt
-          grep -q '/Win2K-XP/Direct3D/WineD3D-1.9.7/d3d9.dll' /tmp/qemu-3dfx-guest-wrappers-files.txt
-          grep -q '/Win2K-XP/INSTALL_D3D_GAME.BAT' /tmp/qemu-3dfx-guest-wrappers-files.txt
-          ! grep -q 'x86_64' /tmp/qemu-3dfx-guest-wrappers-files.txt
-          sha256sum -c artifacts/qemu-3dfx-guest-wrappers.iso.sha256
+          xorriso -indev artifacts/VMADDONS.iso -find / -type f | tee /tmp/vmaddons-files.txt
+          grep -q '/README.TXT' /tmp/vmaddons-files.txt
+          grep -q '/Win9x-ME/FXMEMMAP.VXD' /tmp/vmaddons-files.txt
+          grep -q '/Win9x-ME/GLIDE.DLL' /tmp/vmaddons-files.txt
+          grep -q '/Win9x-ME/GLIDE2X.DLL' /tmp/vmaddons-files.txt
+          grep -q '/Win9x-ME/GLIDE3X.DLL' /tmp/vmaddons-files.txt
+          grep -q '/Win9x-ME/OPENGL32.DLL' /tmp/vmaddons-files.txt
+          grep -q '/Win2K-XP/FXPTL.SYS' /tmp/vmaddons-files.txt
+          grep -q '/Win2K-XP/INSTDRV.EXE' /tmp/vmaddons-files.txt
+          grep -q '/Win2K-XP/GLIDE.DLL' /tmp/vmaddons-files.txt
+          grep -q '/Win2K-XP/GLIDE2X.DLL' /tmp/vmaddons-files.txt
+          grep -q '/Win2K-XP/GLIDE3X.DLL' /tmp/vmaddons-files.txt
+          grep -q '/Win2K-XP/OPENGL32.DLL' /tmp/vmaddons-files.txt
+          ! grep -Ei 'WineD3D|Direct3D' /tmp/vmaddons-files.txt
+          sha256sum -c artifacts/VMADDONS.iso.sha256
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-3dfx-guest-wrappers
+          name: VMADDONS
           path: |
-            artifacts/qemu-3dfx-guest-wrappers.iso
-            artifacts/qemu-3dfx-guest-wrappers.iso.sha256
-            artifacts/guest-wrappers/iso-root/**
+            artifacts/VMADDONS.iso
+            artifacts/VMADDONS.iso.sha256
+            artifacts/vmaddons/iso-root/**
           if-no-files-found: error
 
   build-qemu-binaries:
