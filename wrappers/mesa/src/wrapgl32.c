@@ -530,6 +530,8 @@ static void parse_options(struct mglOptions *opt)
             texClampFix = ((i == 1) && v)? 1:texClampFix;
             i = parse_value(line, "CursorSyncOff,", &v);
             swapCur = ((i == 1) && v)? 0:swapCur;
+            i = parse_value(line, "CursorSyncOn,", &v);
+            swapCur = ((i == 1) && v)? 1:swapCur;
             i = parse_value(line, "FpsLimit,", &v);
             swapFps = (i == 1)? (v & 0x7FU):swapFps;
         }
@@ -17341,7 +17343,7 @@ int WINAPI wglSwapBuffers (HDC hdc)
     DWORD t = GetTickCount();
     CURSORINFO ci = { .cbSize = sizeof(CURSORINFO) };
     if (((t - timestamp) >= 16) &&
-            display_device_supported() && GetCursorInfo(&ci)) {
+            swapCur && GetCursorInfo(&ci)) {
         if (ci.flags != CURSOR_SHOWING)
             memset(&last_pos, 0, sizeof(POINT));
         else {

@@ -16,6 +16,7 @@ Witness, experience and share your thoughts on modern CPU/GPU prowess for retro 
 - YouTube channel (https://www.youtube.com/@qemu-3dfx/videos)
 - VOGONS forums (https://www.vogons.org)
 - Wiki (https://github.com/kjliew/qemu-3dfx/wiki)
+- Arch Linux/libvirt Windows XP setup notes ([docs/windows-xp-archlinux-libvirt.md](docs/windows-xp-archlinux-libvirt.md))
 ## Building QEMU
 Following instructions are based on `MSYS2/mingw-w64` BASH shell environment on modern Windows. It is meant to be simple and minor variations are inevitable due to different flavors of Linux distributions.
 
