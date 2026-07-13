@@ -6,7 +6,8 @@ ARTIFACT_DIR="${ARTIFACT_DIR:-"$ROOT_DIR/artifacts"}"
 ISO_NAME="${ISO_NAME:-qemu-3dfx-guest-wrappers.iso}"
 ISO_PATH="${ISO_PATH:-"$ARTIFACT_DIR/$ISO_NAME"}"
 WINED3D_BASE_URL="${WINED3D_BASE_URL:-https://downloads.fdossena.com/Projects/WineD3D/Builds}"
-WINED3D_INDEX_URL="${WINED3D_INDEX_URL:-https://downloads.fdossena.com/geth.php?r=wined3d-all}"
+WINED3D_INDEX_URL="${WINED3D_INDEX_URL:-$WINED3D_BASE_URL/}"
+WINED3D_INDEX_FALLBACK_URL="${WINED3D_INDEX_FALLBACK_URL:-https://downloads.fdossena.com/geth.php?r=wined3d-all}"
 WINED3D_RECOMMENDED_URL="${WINED3D_RECOMMENDED_URL:-https://downloads.fdossena.com/geth.php?r=wined3d-recommended}"
 WINED3D_ARCHIVES="${WINED3D_ARCHIVES:-}"
 WINED3D_DEFAULT_VERSION="${WINED3D_DEFAULT_VERSION:-}"
@@ -71,15 +72,41 @@ archive_to_wined3d_id() {
 }
 
 discover_wined3d_archives() {
+  local index_file="$ARTIFACT_DIR/guest-wrappers/wined3d-index.html"
+  local archive_list="$ARTIFACT_DIR/guest-wrappers/wined3d-archives.txt"
+  local archive_count
+
   if [[ -n "$WINED3D_ARCHIVES" ]]; then
     printf '%s\n' $WINED3D_ARCHIVES
     return
   fi
 
-  curl -fsL "$WINED3D_INDEX_URL" |
-    grep -Eo 'WineD3DForWindows_[^"<>[:space:]]+\.zip' |
+  mkdir -p "$(dirname "$index_file")"
+
+  echo "Discovering WineD3D archives from $WINED3D_INDEX_URL" >&2
+  curl -fsLA 'Mozilla/5.0' "$WINED3D_INDEX_URL" -o "$index_file"
+
+  grep -Eo 'WineD3DForWindows_[^"<>[:space:]]+\.zip' "$index_file" |
     awk '!seen[$0]++' |
-    grep -v 'x86_64'
+    grep -v 'x86_64' > "$archive_list" || true
+
+  archive_count="$(wc -l < "$archive_list")"
+
+  if [[ "$archive_count" -eq 0 && -n "$WINED3D_INDEX_FALLBACK_URL" ]]; then
+    echo "No 32-bit WineD3D archives found; retrying discovery from $WINED3D_INDEX_FALLBACK_URL" >&2
+    curl -fsLA 'Mozilla/5.0' "$WINED3D_INDEX_FALLBACK_URL" -o "$index_file"
+    grep -Eo 'WineD3DForWindows_[^"<>[:space:]]+\.zip' "$index_file" |
+      awk '!seen[$0]++' |
+      grep -v 'x86_64' > "$archive_list" || true
+    archive_count="$(wc -l < "$archive_list")"
+  fi
+
+  echo "Discovered $archive_count 32-bit WineD3D archive(s)." >&2
+  if [[ "$archive_count" -gt 0 ]]; then
+    sed -n '1,10p' "$archive_list" >&2
+  fi
+
+  cat "$archive_list"
 }
 
 resolve_recommended_wined3d_id() {
