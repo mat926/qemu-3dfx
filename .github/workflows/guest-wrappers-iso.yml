@@ -27,9 +27,11 @@ jobs:
             binutils \
             binutils-mingw-w64-i686 \
             build-essential \
+            curl \
             gcc-mingw-w64-i686 \
             git \
             libdigest-sha-perl \
+            libarchive-tools \
             make \
             mingw-w64-tools \
             perl \
@@ -41,7 +43,14 @@ jobs:
 
       - name: Verify ISO contents
         run: |
-          xorriso -indev artifacts/qemu-3dfx-guest-wrappers.iso -find / -type f
+          xorriso -indev artifacts/qemu-3dfx-guest-wrappers.iso -find / -type f | tee /tmp/qemu-3dfx-guest-wrappers-files.txt
+          grep -q '/Win2K-XP/Direct3D/VERSIONS.TXT' /tmp/qemu-3dfx-guest-wrappers-files.txt
+          grep -q '/Win2K-XP/Direct3D/WineD3D-1.7.52/d3d9.dll' /tmp/qemu-3dfx-guest-wrappers-files.txt
+          grep -q '/Win2K-XP/Direct3D/WineD3D-1.7.52/wined3d.dll' /tmp/qemu-3dfx-guest-wrappers-files.txt
+          grep -q '/Win2K-XP/Direct3D/WineD3D-1.7.52/libwine.dll' /tmp/qemu-3dfx-guest-wrappers-files.txt
+          grep -q '/Win2K-XP/Direct3D/WineD3D-1.9.7/d3d9.dll' /tmp/qemu-3dfx-guest-wrappers-files.txt
+          grep -q '/Win2K-XP/INSTALL_D3D_GAME.BAT' /tmp/qemu-3dfx-guest-wrappers-files.txt
+          ! grep -q 'x86_64' /tmp/qemu-3dfx-guest-wrappers-files.txt
           sha256sum -c artifacts/qemu-3dfx-guest-wrappers.iso.sha256
 
       - name: Upload ISO artifact

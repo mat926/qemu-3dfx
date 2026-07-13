@@ -5,9 +5,18 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARTIFACT_DIR="${ARTIFACT_DIR:-"$ROOT_DIR/artifacts"}"
 ISO_NAME="${ISO_NAME:-qemu-3dfx-guest-wrappers.iso}"
 ISO_PATH="${ISO_PATH:-"$ARTIFACT_DIR/$ISO_NAME"}"
+WINED3D_BASE_URL="${WINED3D_BASE_URL:-https://downloads.fdossena.com/Projects/WineD3D/Builds}"
+WINED3D_INDEX_URL="${WINED3D_INDEX_URL:-https://downloads.fdossena.com/geth.php?r=wined3d-all}"
+WINED3D_RECOMMENDED_URL="${WINED3D_RECOMMENDED_URL:-https://downloads.fdossena.com/geth.php?r=wined3d-recommended}"
+WINED3D_ARCHIVES="${WINED3D_ARCHIVES:-}"
+WINED3D_DEFAULT_VERSION="${WINED3D_DEFAULT_VERSION:-}"
+WINED3D_SKIP_UCRT="${WINED3D_SKIP_UCRT:-1}"
 BUILD_3DFX="$ROOT_DIR/wrappers/3dfx/build-ci"
 BUILD_MESA="$ROOT_DIR/wrappers/mesa/build-ci"
 STAGE_DIR="$ARTIFACT_DIR/guest-wrappers/iso-root"
+WINED3D_CACHE_DIR="$ROOT_DIR/.cache/wined3d"
+WINED3D_STAGED_IDS=()
+WINED3D_SKIPPED_IDS=()
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -40,7 +49,7 @@ verify_xp_runtime_imports() {
     echo "Missing expected Windows PE file: $file" >&2
     exit 1
   fi
-  if objdump -p "$file" | grep -Eiq 'DLL Name: (api-ms-win-crt|ucrtbase\.dll)'; then
+  if has_modern_crt_imports "$file"; then
     echo "Modern UCRT import found in $file; this is not compatible with Windows 9x/2000/XP." >&2
     objdump -p "$file" | grep -Ei 'DLL Name: (api-ms-win-crt|ucrtbase\.dll)' >&2 || true
     exit 1
@@ -53,12 +62,170 @@ write_crlf() {
   sed 's/$/\r/' > "$dst"
 }
 
+archive_to_wined3d_id() {
+  local archive="$1"
+  archive="${archive##*/}"
+  archive="${archive#WineD3DForWindows_}"
+  archive="${archive%.zip}"
+  printf '%s\n' "$archive"
+}
+
+discover_wined3d_archives() {
+  if [[ -n "$WINED3D_ARCHIVES" ]]; then
+    printf '%s\n' $WINED3D_ARCHIVES
+    return
+  fi
+
+  curl -fsL "$WINED3D_INDEX_URL" |
+    grep -Eo 'WineD3DForWindows_[^"<>[:space:]]+\.zip' |
+    awk '!seen[$0]++' |
+    grep -v 'x86_64'
+}
+
+resolve_recommended_wined3d_id() {
+  curl -fsIL "$WINED3D_RECOMMENDED_URL" |
+    sed -nE 's/^[Ll]ocation:[[:space:]]*.*WineD3DForWindows_([^/[:space:]]+)\.zip.*/\1/p' |
+    tr -d '\r' |
+    tail -n 1
+}
+
+download_wined3d_archive() {
+  local archive="$1"
+  local url="$WINED3D_BASE_URL/$archive"
+  local zip_path="$WINED3D_CACHE_DIR/$archive"
+
+  mkdir -p "$WINED3D_CACHE_DIR"
+  if [[ ! -f "$zip_path" ]]; then
+    echo "Downloading $archive..." >&2
+    curl -fL --retry 3 --retry-delay 2 -o "$zip_path.tmp" "$url"
+    mv "$zip_path.tmp" "$zip_path"
+  fi
+
+  printf '%s\n' "$zip_path"
+}
+
+find_extracted_file() {
+  local src_dir="$1"
+  local name="$2"
+  find "$src_dir" -type f -iname "$name" -print -quit
+}
+
+copy_extracted_optional() {
+  local src_dir="$1"
+  local name="$2"
+  local dst_dir="$3"
+  local src
+  src="$(find_extracted_file "$src_dir" "$name")"
+  if [[ -n "$src" ]]; then
+    install -D -m 0644 "$src" "$dst_dir/$(basename "$src")"
+    return 0
+  fi
+  return 1
+}
+
+copy_extracted_required() {
+  local src_dir="$1"
+  local name="$2"
+  local dst_dir="$3"
+  if ! copy_extracted_optional "$src_dir" "$name" "$dst_dir"; then
+    echo "Missing required WineD3D file $name in $src_dir" >&2
+    return 1
+  fi
+}
+
+has_modern_crt_imports() {
+  local file="$1"
+  objdump -p "$file" | grep -Eiq 'DLL Name: (api-ms-win-crt|ucrtbase\.dll)'
+}
+
+stage_wined3d_archive() {
+  local archive="$1"
+  local zip_path="$2"
+  local id
+  local extract_dir
+  local dst
+  local file
+  local frontend_count=0
+  local readme
+  id="$(archive_to_wined3d_id "$archive")"
+  extract_dir="$ARTIFACT_DIR/guest-wrappers/wined3d-extract-$id"
+  dst="$WINXP/Direct3D/WineD3D-$id"
+
+  rm -rf "$extract_dir" "$dst"
+  mkdir -p "$extract_dir" "$dst"
+  bsdtar -xf "$zip_path" -C "$extract_dir"
+
+  copy_extracted_required "$extract_dir" "wined3d.dll" "$dst"
+
+  for file in \
+    ddraw.dll \
+    d3d8.dll \
+    d3d9.dll \
+    d3d10.dll \
+    d3d10_1.dll \
+    d3d10core.dll \
+    d3d11.dll \
+    dxgi.dll; do
+    if copy_extracted_optional "$extract_dir" "$file" "$dst"; then
+      frontend_count=$((frontend_count + 1))
+    fi
+  done
+
+  copy_extracted_optional "$extract_dir" "libwine.dll" "$dst" || true
+
+  readme="$(find "$extract_dir" -type f -iname '*README*.txt' -print -quit)"
+  if [[ -n "$readme" ]]; then
+    install -D -m 0644 "$readme" "$dst/README.txt"
+  fi
+
+  if [[ "$frontend_count" -eq 0 ]]; then
+    echo "No Direct3D or DirectDraw frontend DLLs found in $archive" >&2
+    rm -rf "$dst"
+    return 1
+  fi
+
+  for file in "$dst"/*.dll; do
+    if has_modern_crt_imports "$file"; then
+      if [[ "$WINED3D_SKIP_UCRT" == "1" ]]; then
+        echo "Skipping $archive: $(basename "$file") imports api-ms-win-crt or ucrtbase.dll." >&2
+        rm -rf "$dst"
+        WINED3D_SKIPPED_IDS+=("$id")
+        return 0
+      fi
+      verify_xp_runtime_imports "$file"
+    fi
+  done
+
+  write_crlf "$dst/SOURCE.TXT" <<EOF
+WineD3D for Windows $id
+=======================
+
+Downloaded from:
+  $WINED3D_BASE_URL/$archive
+
+Project page:
+  https://fdossena.com/?p=wined3d/index.frag
+
+License:
+  GNU LGPL version 2 or newer, as published by the WineD3D for Windows project.
+
+The original package README is included as README.TXT in this folder.
+EOF
+
+  WINED3D_STAGED_IDS+=("$id")
+}
+
+require_cmd awk
 require_cmd bash
+require_cmd bsdtar
+require_cmd curl
 require_cmd gendef
 require_cmd git
+require_cmd grep
 require_cmd make
 require_cmd objdump
 require_cmd shasum
+require_cmd sha256sum
 require_cmd xorriso
 require_cmd xxd
 require_cmd i686-w64-mingw32-gcc
@@ -120,6 +287,60 @@ write_crlf "$WINXP/wrapgl32.ext" <<'EOF'
 CursorSyncOn,1
 EOF
 
+while IFS= read -r wined3d_archive; do
+  [[ -n "$wined3d_archive" ]] || continue
+  stage_wined3d_archive "$wined3d_archive" "$(download_wined3d_archive "$wined3d_archive")"
+done < <(discover_wined3d_archives)
+
+if [[ "${#WINED3D_STAGED_IDS[@]}" -eq 0 ]]; then
+  echo "No WineD3D archives were staged." >&2
+  exit 1
+fi
+
+if [[ -z "$WINED3D_DEFAULT_VERSION" ]]; then
+  WINED3D_DEFAULT_VERSION="$(resolve_recommended_wined3d_id || true)"
+fi
+
+if [[ -z "$WINED3D_DEFAULT_VERSION" ]]; then
+  WINED3D_DEFAULT_VERSION="${WINED3D_STAGED_IDS[0]}"
+fi
+
+if [[ ! -d "$WINXP/Direct3D/WineD3D-$WINED3D_DEFAULT_VERSION" ]]; then
+  echo "Default WineD3D version $WINED3D_DEFAULT_VERSION was not staged; using ${WINED3D_STAGED_IDS[0]}." >&2
+  WINED3D_DEFAULT_VERSION="${WINED3D_STAGED_IDS[0]}"
+fi
+
+{
+  for wined3d_id in "${WINED3D_STAGED_IDS[@]}"; do
+    printf '%s\n' "$wined3d_id"
+  done
+} | sed 's/$/\r/' > "$WINXP/Direct3D/VERSIONS.TXT"
+
+WINED3D_VERSION_COUNT="${#WINED3D_STAGED_IDS[@]}"
+WINED3D_SKIPPED_COUNT="${#WINED3D_SKIPPED_IDS[@]}"
+
+if [[ "$WINED3D_SKIPPED_COUNT" -gt 0 ]]; then
+  {
+    printf 'The following 32-bit WineD3D package(s) were discovered but not packaged.\n'
+    printf 'They import api-ms-win-crt-* or ucrtbase.dll and are not suitable for a stock Windows XP guest.\n\n'
+    for wined3d_id in "${WINED3D_SKIPPED_IDS[@]}"; do
+      printf '%s\n' "$wined3d_id"
+    done
+  } | sed 's/$/\r/' > "$WINXP/Direct3D/SKIPPED_UCRT.TXT"
+fi
+
+write_crlf "$WINXP/Direct3D/INSTALL_ALL_VERSIONS_WARNING.TXT" <<EOF
+This ISO includes $WINED3D_VERSION_COUNT XP-compatible 32-bit WineD3D for
+Windows package(s).
+
+Use INSTALL_D3D_GAME.BAT from the parent Win2K-XP folder to copy one selected
+WineD3D version into a game's install folder. Do not copy every WineD3D version
+into the same game folder at the same time.
+
+If present, SKIPPED_UCRT.TXT lists newer packages that were not bundled because
+they import api-ms-win-crt-* or ucrtbase.dll.
+EOF
+
 write_crlf "$STAGE_DIR/README.TXT" <<'EOF'
 qemu-3dfx guest wrappers
 ========================
@@ -133,9 +354,9 @@ Folders:
 
 Direct3D notes:
 
-  qemu-3dfx does not provide a native Direct3D driver. Direct3D games can use
-  WineD3D DLLs in the game directory together with this ISO's opengl32.dll.
-  See Win2K-XP\README_D3D9.TXT for the tested Direct3D 9 wrapper layout.
+  qemu-3dfx does not provide a native Direct3D driver visible in DXDIAG.
+  Direct3D games can use the included WineD3D DLLs in the game directory
+  together with this ISO's opengl32.dll. See Win2K-XP\README_D3D.TXT.
 
 The Windows wrapper binaries should import msvcrt.dll, not api-ms-win-crt-*.
 That keeps them usable on Windows 9x/ME/2000/XP.
@@ -224,37 +445,75 @@ Automatic install scripts:
   INSTALL_OPENGL_GAME.BAT "C:\Path\To\Game"
     Copies OPENGL32.DLL and WRAPGL32.EXT into a game folder.
 
-  INSTALL_D3D9_GAME.BAT "C:\Path\To\Game" "C:\Path\To\WineD3D"
-    Copies OPENGL32.DLL, WRAPGL32.EXT, D3D9.DLL, and WINED3D.DLL into a game
-    folder. WineD3D DLLs are not included on this ISO.
+  INSTALL_D3D_GAME.BAT "C:\Path\To\Game" [WineD3D-Version]
+    Copies OPENGL32.DLL, WRAPGL32.EXT, and the selected WineD3D Direct3D DLLs
+    into a game folder. See Direct3D\VERSIONS.TXT for bundled versions.
+
+  INSTALL_D3D9_GAME.BAT "C:\Path\To\Game" [WineD3D-Version]
+    Compatibility alias for INSTALL_D3D_GAME.BAT.
 EOF
 
-write_crlf "$WINXP/README_D3D9.TXT" <<'EOF'
-Direct3D 9 games on Windows 2000/XP
-===================================
+write_crlf "$WINXP/README_D3D.TXT" <<EOF
+Direct3D games on Windows 2000/XP
+=================================
 
 qemu-3dfx accelerates Direct3D games through WineD3D, not through a native
 Direct3D driver visible in DXDIAG.
 
-Expected file layout for a Direct3D 9 game:
+This ISO includes $WINED3D_VERSION_COUNT XP-compatible 32-bit WineD3D for
+Windows package(s) discovered from the upstream all-versions archive. It
+excludes x86_64 packages because this Windows XP VM is 32-bit.
+
+Skipped UCRT-based package count:
+
+  $WINED3D_SKIPPED_COUNT
+
+Bundled versions are listed in:
+
+  Direct3D\VERSIONS.TXT
+
+If present, skipped versions are listed in:
+
+  Direct3D\SKIPPED_UCRT.TXT
+
+Default version used by the install scripts:
+
+  WineD3D-$WINED3D_DEFAULT_VERSION
+
+Expected file layout for a Direct3D game:
 
   GameFolder\Game.exe
+  GameFolder\ddraw.dll
+  GameFolder\d3d8.dll
   GameFolder\d3d9.dll
   GameFolder\wined3d.dll
+  GameFolder\libwine.dll
   GameFolder\opengl32.dll
   GameFolder\wrapgl32.ext
 
 Tested Windows XP Trackmania Nations ESWC layout:
 
 1. Use WineD3D 1.9.7 d3d9.dll and wined3d.dll.
-2. Copy this ISO's opengl32.dll into the game folder.
-3. Copy this ISO's wrapgl32.ext into the game folder if the game needs cursor
+2. Copy libwine.dll from the same WineD3D release.
+3. Copy this ISO's opengl32.dll into the game folder.
+4. Copy this ISO's wrapgl32.ext into the game folder if the game needs cursor
    sync.
-4. Run the game fullscreen if text fields do not receive keyboard input in
+5. Run the game fullscreen if text fields do not receive keyboard input in
    windowed mode.
 
-Do not copy WineD3D d3d9.dll or wined3d.dll into C:\WINDOWS\system32 for this
-per-game setup.
+The INSTALL_D3D_GAME.BAT script copies all bundled WineD3D DLLs from the
+selected release into a game folder. Depending on the selected WineD3D release,
+that can include DirectDraw, Direct3D 8, Direct3D 9, Direct3D 10/11, DXGI,
+wined3d.dll, and libwine.dll. Windows XP games normally use DirectDraw,
+Direct3D 8, or Direct3D 9.
+
+Do not copy WineD3D DLLs into C:\WINDOWS\system32 for this per-game setup.
+EOF
+
+write_crlf "$WINXP/README_D3D9.TXT" <<'EOF'
+This file is kept for compatibility with older ISO instructions.
+
+Use README_D3D.TXT and INSTALL_D3D_GAME.BAT for Direct3D game installs.
 EOF
 
 write_crlf "$WINXP/INSTALL_SYSTEM.BAT" <<'EOF'
@@ -289,22 +548,37 @@ echo Usage: INSTALL_OPENGL_GAME.BAT "C:\Path\To\Game"
 pause
 EOF
 
+write_crlf "$WINXP/INSTALL_D3D_GAME.BAT" <<EOF
+@echo off
+set SRC=%~dp0
+set VERSION=$WINED3D_DEFAULT_VERSION
+if "%~1"=="" goto usage
+if not "%~2"=="" set VERSION=%~2
+set D3DSRC=%SRC%Direct3D\WineD3D-%VERSION%
+if not exist "%D3DSRC%\WINED3D.DLL" goto missing
+copy /Y "%SRC%OPENGL32.DLL" "%~1\OPENGL32.DLL"
+copy /Y "%SRC%WRAPGL32.EXT" "%~1\WRAPGL32.EXT"
+for %%F in (DDRAW.DLL D3D8.DLL D3D9.DLL D3D10.DLL D3D10CORE.DLL D3D11.DLL DXGI.DLL WINED3D.DLL LIBWINE.DLL) do if exist "%D3DSRC%\%%F" copy /Y "%D3DSRC%\%%F" "%~1\%%F"
+echo Installed qemu-3dfx OpenGL wrapper and WineD3D %VERSION% files into %~1
+goto end
+:missing
+echo WineD3D %VERSION% was not found at:
+echo %D3DSRC%
+echo.
+echo Available bundled versions are under:
+echo %SRC%Direct3D
+goto end
+:usage
+echo Usage: INSTALL_D3D_GAME.BAT "C:\Path\To\Game" [WineD3D-Version]
+echo Default WineD3D version: $WINED3D_DEFAULT_VERSION
+:end
+pause
+EOF
+
 write_crlf "$WINXP/INSTALL_D3D9_GAME.BAT" <<'EOF'
 @echo off
 set SRC=%~dp0
-if "%~1"=="" goto usage
-if "%~2"=="" goto usage
-copy /Y "%SRC%OPENGL32.DLL" "%~1\OPENGL32.DLL"
-copy /Y "%SRC%WRAPGL32.EXT" "%~1\WRAPGL32.EXT"
-copy /Y "%~2\D3D9.DLL" "%~1\D3D9.DLL"
-copy /Y "%~2\WINED3D.DLL" "%~1\WINED3D.DLL"
-echo Installed qemu-3dfx OpenGL wrapper and WineD3D files into %~1
-goto end
-:usage
-echo Usage: INSTALL_D3D9_GAME.BAT "C:\Path\To\Game" "C:\Path\To\WineD3D"
-echo WineD3D folder must contain D3D9.DLL and WINED3D.DLL.
-:end
-pause
+call "%SRC%INSTALL_D3D_GAME.BAT" %*
 EOF
 
 xorriso -as mkisofs -r -J -V QEMU3DFX_WRAP -o "$ISO_PATH" "$STAGE_DIR"
